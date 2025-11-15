@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include <algorithm>
 #include <charconv>
+#include <concepts>
 #include <expected>
 #include <format>
 #include <source_location>
@@ -18,7 +19,9 @@ namespace stdx::details {
 
 // здесь ваш код
 template <typename T>
-std::expected<T, scan_error> do_parse(std::string_view input);
+std::expected<T, scan_error> do_parse(std::string_view input) {
+    return std::unexpected(scan_error("type not supported"));
+}
 
 template <typename T>
 concept IsValue = !std::is_pointer_v<T> && !std::is_reference_v<T>;
@@ -37,32 +40,37 @@ template <typename T>
 concept FixedIntegral = SignedFixedIntegral<T> || UnsignedFixedIntegral<T>;
 
 template <typename T>
-concept FloatingNumber = std::is_same_v<std::remove_cv_t<T>, float> || std::is_same_v<std::remove_cv_t<T>, double>;
+concept Number = FixedIntegral<T> || std::floating_point<T>;
 
 template <typename T>
-concept Number = FixedIntegral<T> || FloatingNumber<T>;
+concept RemoveCVString = std::is_same_v<std::remove_cv_t<T>, std::string>;
+
+template <typename T>
+concept RemoveCVStringView = std::is_same_v<std::remove_cv_t<T>, std::string_view>;
 
 template <Number T>
 std::expected<T, scan_error> do_parse(std::string_view input) {
-    T val;
-    if (auto result = std::from_chars(input.begin(), input.end(), val);
+    std::remove_const_t<T> dummy;
+    if (auto result = std::from_chars(input.begin(), input.end(), dummy);
         result.ec == std::errc{} && result.ptr == input.data() + input.size()) {
-        return val;
+        return T(dummy);
     }
     return std::unexpected(scan_error(std::format("could not convert {}", input)));
 }
 
-template <>
-inline std::expected<std::string_view, scan_error> do_parse(std::string_view input) {
+template <RemoveCVStringView T>
+inline std::expected<T, scan_error> do_parse(std::string_view input) {
     return input;
 }
 
-template <>
-inline std::expected<std::string, scan_error> do_parse(std::string_view input) {
-    return std::string(input);
+template <RemoveCVString T>
+inline std::expected<T, scan_error> do_parse(std::string_view input) {
+    return T(input);
 }
 
-static const std::unordered_set<char> kFromats = {'d', 's', 'u', 'f'};
+// static const std::unordered_set<char> kFromats =
+static constexpr int kNum = 4;
+static constexpr std::array<char, kNum> kFormats = {'d', 's', 'u', 'f'};
 
 // Функция для парсинга значения с учетом спецификатора формата
 template <typename T>
@@ -78,7 +86,7 @@ std::expected<T, scan_error> parse_value_with_format(std::string_view input, std
         return std::unexpected(scan_error("invalid format"));
     }
     auto f = fmt[1];
-    if (!kFromats.count(f)) {
+    if (auto it = std::find(kFormats.begin(), kFormats.end(), f); it == kFormats.end()) {
         return std::unexpected(scan_error(std::format("unknown format specifier", fmt)));
     }
     switch (f) {
@@ -88,7 +96,7 @@ std::expected<T, scan_error> parse_value_with_format(std::string_view input, std
         }
         break;
     case 's':
-        if (!std::is_same_v<T, std::string>) {
+        if (!std::is_same_v<T, std::string> && !std::is_same_v<T, std::string_view>) {
             return std::unexpected(scan_error(std::format("%s format specified but template type is not std::string")));
         }
         break;
@@ -99,7 +107,7 @@ std::expected<T, scan_error> parse_value_with_format(std::string_view input, std
         }
         break;
     case 'f':
-        if (!FloatingNumber<T>) {
+        if (!std::floating_point<T>) {
             return std::unexpected(scan_error(std::format("%f format specified but template type is not float")));
         }
         break;

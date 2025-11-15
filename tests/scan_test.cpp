@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include <gtest/gtest.h>
 #include <iostream>
+#include <type_traits>
 
 TEST(ScanTest, Parse) {
     auto input = std::string_view("I want to sum 42 and 3.14 numbers.");
@@ -17,11 +18,24 @@ TEST(ScanTest, SimpleTest) {
     ASSERT_EQ(std::get<0>(result->data), std::string("number"));
 }
 
+TEST(ScanTest, TestConstInt) {
+    auto result = stdx::scan<const int>("4", "{%d}");
+    ASSERT_TRUE(result);
+    ASSERT_EQ(std::get<0>(result->data), 4);
+}
+
+TEST(ScanTest, TestConstString) {
+    auto result = stdx::scan<const std::string>("text", "{}");
+    ASSERT_TRUE(result);
+    ASSERT_TRUE((std::is_same_v<std::remove_reference_t<decltype(result->value<0>())>, const std::string>));
+    ASSERT_EQ(std::get<0>(result->data), "text");
+}
+
 TEST(ScanTest, TestTwoNumbers) {
     auto result = stdx::scan<int, double>("I want to sum 42 and 3.14 numbers.", "I want to sum {} and {%f} numbers.");
     ASSERT_TRUE(result);
     ASSERT_EQ(std::get<0>(result->data), int(42));
-    ASSERT_EQ(std::get<1>(result->data), double(3.14));
+    EXPECT_DOUBLE_EQ(std::get<1>(result->data), double(3.14));
 }
 
 TEST(ScanTest, TestTwoNumbersFail) {
@@ -54,4 +68,20 @@ TEST(ScanTest, TestSignedOK) {
 TEST(ScanTest, TestUnisgned) {
     auto result = stdx::scan<unsigned>("I want to get -42.", "I want to get {%u}.");
     ASSERT_FALSE(result);
+}
+
+TEST(ScanTest, TestPointerType) {
+    auto result = stdx::scan<int *>("I want to get 1.", "I want to get {}.");
+    ASSERT_FALSE(result);
+}
+
+enum class Foo {
+    one = 1,
+    two = 2,
+};
+
+TEST(ScanTest, TestUnsupportedType) {
+    auto result = stdx::scan<Foo>("I want to get 1.", "I want to get {}.");
+    ASSERT_FALSE(result);
+    ASSERT_EQ(result.error().message, "type not supported");
 }
